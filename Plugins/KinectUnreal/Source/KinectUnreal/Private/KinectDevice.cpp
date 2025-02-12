@@ -61,6 +61,9 @@ KinectDevice::KinectDevice()
 	totalFaceVertices = 0;
 	bRunning = false;
 	isUpdatingColorFeed = false;
+
+	bReconnecting = false; // Khởi tạo flag reconnecting
+	reconnectAttempts = 0;  // Đặt số lần thử lại ban đầu
 }
 
 KinectDevice::~KinectDevice()
@@ -124,6 +127,36 @@ void KinectDevice::DeleteInstance() {
 	Instance.reset();
 }
 
+// Thêm phương thức CheckAndReconnect để kiểm tra và thử kết nối lại
+bool KinectDevice::CheckAndReconnect() {
+	if (bReconnecting || reconnectAttempts >= 3) {  // Nếu đã đang kết nối lại hoặc đã thử quá 3 lần
+		return false;
+	}
+
+	bReconnecting = true;
+	reconnectAttempts++;
+
+	// Cố gắng kết nối lại
+	if (FAILED(GetDefaultKinectSensor(&m_pKinectSensor))) {
+		UE_LOG(LogTemp, Error, TEXT("Failed to reconnect to Kinect sensor."));
+		bReconnecting = false;
+		return false;
+	}
+
+	// Mở lại Kinect
+	if (FAILED(m_pKinectSensor->Open())) {
+		UE_LOG(LogTemp, Error, TEXT("Failed to reopen Kinect sensor."));
+		bReconnecting = false;
+		return false;
+	}
+
+	UE_LOG(LogTemp, Display, TEXT("Reconnected to Kinect sensor successfully."));
+	bReconnecting = false;
+	reconnectAttempts = 0;  // Đặt lại số lần thử kết nối
+
+	return true;
+}
+
 bool KinectDevice::Init() {
 	std::lock_guard<std::mutex> lock(kinectDataMutex);
 	HRESULT hr;
@@ -171,6 +204,12 @@ bool KinectDevice::Init() {
 					{
 						texture->UpdateResource();
 					});
+			}
+
+			// Đảm bảo kết nối lại nếu Kinect không có sẵn
+			if (!m_pKinectSensor->get_IsAvailable() && !CheckAndReconnect()) {
+				UE_LOG(LogTemp, Error, TEXT("Kinect sensor is unavailable and failed to reconnect."));
+				return false;
 			}
 
 			if (extractIRData) {
