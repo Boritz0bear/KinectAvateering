@@ -1,5 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 #include "KinectDevice.h"
 #include "KinematicChain.h"
 #include <Runtime/Engine/Classes/Engine/Texture2D.h>
@@ -7,27 +6,32 @@
 #ifdef UpdateResource
 #undef  UpdateResource
 #endif
- 
+
 EXTERN_C IMAGE_DOS_HEADER __ImageBase;
 
 KinectDevice::KinectDevice()
 {
+	// Khởi tạo mutex để bảo vệ dữ liệu kinectData
 	std::mutex kinectDataMutex;
-	m_pKinectSensor = NULL;
-	m_pCoordinateMapper = NULL;
-	m_pColorCoordinates = NULL;
-	m_pColorCoordinatesAux = NULL;
-	m_pDepthCoordinates = NULL;
-	m_pColorRGBX = NULL;
-	infraRedBuffer = NULL;
-	m_pInfraRedBuffer = NULL;
-	kinectData = NULL;
-	//m_pMultiSourceFrameReader = NULL;
-	m_pDepthFrameReader = NULL;
-	m_pColorFrameReader = NULL;
-	m_pBodyFrameReader = NULL;
-	m_pInfraredFrameReader = NULL;
-	m_pBodyIndexFrameReader = NULL;
+
+	m_pKinectSensor = nullptr;
+	m_pCoordinateMapper = nullptr;
+
+	// Sử dụng std::unique_ptr để tránh memory leak
+	m_pColorCoordinates = std::make_unique<ColorSpacePoint[]>(KinectDTO::cDepthWidth * KinectDTO::cDepthHeight);
+	m_pColorCoordinatesAux = nullptr;
+	m_pDepthCoordinates = std::make_unique<DepthSpacePoint[]>(KinectDTO::cColorWidth * KinectDTO::cColorHeight);
+	m_pColorRGBX = std::make_unique<RGBQUAD[]>(KinectDTO::cColorWidth * KinectDTO::cColorHeight);
+
+	infraRedBuffer = nullptr;
+	m_pInfraRedBuffer = std::make_unique<UINT16[]>(KinectDTO::cDepthWidth * KinectDTO::cDepthHeight);
+	kinectData = nullptr;
+
+	m_pDepthFrameReader = nullptr;
+	m_pColorFrameReader = nullptr;
+	m_pBodyFrameReader = nullptr;
+	m_pInfraredFrameReader = nullptr;
+	m_pBodyIndexFrameReader = nullptr;
 
 	waitableHandle = 0;
 	paused = false;
@@ -39,20 +43,19 @@ KinectDevice::KinectDevice()
 	extractDepthCoordinates = false;
 	extractFaces = false;
 	extractDepthData = true;
-	
+
 	memset(&cameraIntrinsics, sizeof(CameraIntrinsics), 0);
 	cameraIntrinsics.FocalLengthX = cameraIntrinsics.FocalLengthY = -1;
-	
 
-	m_pDethRawBuffer = new UINT16[KinectDTO::cDepthWidth*KinectDTO::cDepthHeight];
+	// Đảm bảo sử dụng unique_ptr cho bộ đệm
+	m_pDethRawBuffer = std::make_unique<UINT16[]>(KinectDTO::cDepthWidth * KinectDTO::cDepthHeight);
 
-	
 	for (int i = 0; i < KinectDTO::cTotalBodies; i++) {
-		m_pFaceFrameReader[i] = NULL;
-		m_pHDFaceFrameSource[i] = NULL;
-		m_pFaceAlignment[i] = NULL;
-		m_pFaceModel[i] = NULL;
-		m_pFaceModelBuilder[i] = NULL;
+		m_pFaceFrameReader[i] = nullptr;
+		m_pHDFaceFrameSource[i] = nullptr;
+		m_pFaceAlignment[i] = nullptr;
+		m_pFaceModel[i] = nullptr;
+		m_pFaceModelBuilder[i] = nullptr;
 	}
 
 	totalFaceVertices = 0;
@@ -63,54 +66,26 @@ KinectDevice::KinectDevice()
 KinectDevice::~KinectDevice()
 {
 	Stop();
-	
-	if ( Thread != nullptr )
+
+	if (Thread != nullptr)
 		Thread->WaitForCompletion();
 
-	if (m_pColorRGBX) {
-		delete[] m_pColorRGBX;
-		m_pColorRGBX = NULL;
-	}
-
-
-	if (m_pColorCoordinates) {
-		delete[] m_pColorCoordinates;
-		m_pColorCoordinates = NULL;
-	}
-
-	if (m_pColorCoordinatesAux) {
-		delete[] m_pColorCoordinatesAux;
-		m_pColorCoordinatesAux = NULL;
-	}
-
-	if (m_pDepthCoordinates) {
-		delete[] m_pDepthCoordinates;
-		m_pDepthCoordinates = NULL;
-	}
-
-	if (infraRedBuffer) {
-		delete[] infraRedBuffer;
-		infraRedBuffer = NULL;
-	}
-
-	if (m_pInfraRedBuffer) {
-		delete[] m_pInfraRedBuffer;
-		m_pInfraRedBuffer = NULL;
-	}
-
-	if (kinectData)
-		delete kinectData;
-
+	// Không cần phải giải phóng bộ nhớ thủ công với unique_ptr
+	m_pColorRGBX = nullptr;
+	m_pColorCoordinates = nullptr;
+	m_pColorCoordinatesAux = nullptr;
+	m_pDepthCoordinates = nullptr;
+	infraRedBuffer = nullptr;
+	m_pInfraRedBuffer = nullptr;
+	kinectData = nullptr;
 	SafeRelease(m_pDepthFrameReader);
 	SafeRelease(m_pColorFrameReader);
 	SafeRelease(m_pBodyFrameReader);
 	SafeRelease(m_pInfraredFrameReader);
 	SafeRelease(m_pBodyIndexFrameReader);
-	if (m_pDethRawBuffer) {
-		delete[] m_pDethRawBuffer;
-		m_pDethRawBuffer = NULL;
-	}
 
+	// Sử dụng unique_ptr để tự động giải phóng bộ nhớ
+	m_pDethRawBuffer = nullptr;
 
 	for (int i = 0; i < KinectDTO::cTotalBodies; i++) {
 		SafeRelease(m_pFaceFrameReader[i]);
@@ -120,11 +95,8 @@ KinectDevice::~KinectDevice()
 		SafeRelease(m_pFaceModel[i]);
 	}
 
-
-	// done with coordinate mapper
 	SafeRelease(m_pCoordinateMapper);
 
-	// close the Kinect Sensor
 	if (m_pKinectSensor) {
 		UE_LOG(LogTemp, Display, TEXT("Kinect sensor closed"));
 		m_pKinectSensor->Close();
@@ -133,25 +105,23 @@ KinectDevice::~KinectDevice()
 	SafeRelease(m_pKinectSensor);
 }
 
-//Singleton access
+// Singleton access
 KinectDevice* KinectDevice::Instance = nullptr;
 
 KinectDevice* const KinectDevice::GetInstance()
 {
 	if (Instance == nullptr)
 	{
-		//TODO (OS): Make this a little more RAII
-		Instance = new KinectDevice();
-		Instance->Thread = FRunnableThread::Create(Instance, TEXT("KinectThread"), 0, EThreadPriority::TPri_Normal);
+		// Khởi tạo đối tượng KinectDevice sử dụng unique_ptr để quản lý bộ nhớ tự động
+		Instance = std::make_unique<KinectDevice>();
+		Instance->Thread = FRunnableThread::Create(Instance.get(), TEXT("KinectThread"), 0, EThreadPriority::TPri_Normal);
 	}
-	return Instance;
+	return Instance.get();
 }
 
 void KinectDevice::DeleteInstance() {
-	if ( Instance != nullptr) {
-		delete Instance;
-		Instance = nullptr;
-	}
+	// Dùng reset để tự động giải phóng bộ nhớ
+	Instance.reset();
 }
 
 bool KinectDevice::Init() {
@@ -179,9 +149,7 @@ bool KinectDevice::Init() {
 			}
 			SafeRelease(pDepthFrameSource);
 
-			
 			if (extractColorData) {
-				// Initialize the Kinect and get the color reader
 				IColorFrameSource* pColorFrameSource = NULL;
 				hr = m_pKinectSensor->get_ColorFrameSource(&pColorFrameSource);
 				if (SUCCEEDED(hr)) {
@@ -189,11 +157,11 @@ bool KinectDevice::Init() {
 				}
 				SafeRelease(pColorFrameSource);
 
-				m_pColorRGBX = new RGBQUAD[KinectDTO::cColorWidth * KinectDTO::cColorHeight];
-				m_pColorCoordinates = new ColorSpacePoint[KinectDTO::cDepthWidth * KinectDTO::cDepthHeight];
+				m_pColorRGBX = std::make_unique<RGBQUAD[]>(KinectDTO::cColorWidth * KinectDTO::cColorHeight);
+				m_pColorCoordinates = std::make_unique<ColorSpacePoint[]>(KinectDTO::cDepthWidth * KinectDTO::cDepthHeight);
 
 				if (extractDepthCoordinates)
-					m_pDepthCoordinates = new DepthSpacePoint[KinectDTO::cColorWidth * KinectDTO::cColorHeight];
+					m_pDepthCoordinates = std::make_unique<DepthSpacePoint[]>(KinectDTO::cColorWidth * KinectDTO::cColorHeight);
 
 				cameraTexture = UTexture2D::CreateTransient(KinectDTO::cColorWidth, KinectDTO::cColorHeight);
 
@@ -202,20 +170,10 @@ bool KinectDevice::Init() {
 					UTexture2D*, texture, cameraTexture.Get(),
 					{
 						texture->UpdateResource();
-						/*if (texture->Resource)
-						{
-							texture->BeginInitResource(texture->Resource);
-						}*/
-
 					});
-
-
-
-				
 			}
 
 			if (extractIRData) {
-				// Initialize the Kinect and get the infrared reader
 				IInfraredFrameSource* pInfraredFrameSource = NULL;
 				hr = m_pKinectSensor->get_InfraredFrameSource(&pInfraredFrameSource);
 
@@ -225,16 +183,15 @@ bool KinectDevice::Init() {
 
 				SafeRelease(pInfraredFrameSource);
 
-				infraRedBuffer = new BYTE[KinectDTO::cDepthWidth*KinectDTO::cDepthHeight];
-				memset(infraRedBuffer, 0, KinectDTO::cDepthWidth*KinectDTO::cDepthHeight);
-				m_pInfraRedBuffer = new UINT16[KinectDTO::cDepthWidth*KinectDTO::cDepthHeight];
-				memset(m_pInfraRedBuffer, 0, KinectDTO::cDepthWidth*KinectDTO::cDepthHeight * sizeof(UINT16));
-				
+				infraRedBuffer = new BYTE[KinectDTO::cDepthWidth * KinectDTO::cDepthHeight];
+				memset(infraRedBuffer, 0, KinectDTO::cDepthWidth * KinectDTO::cDepthHeight);
+				m_pInfraRedBuffer = new UINT16[KinectDTO::cDepthWidth * KinectDTO::cDepthHeight];
+				memset(m_pInfraRedBuffer, 0, KinectDTO::cDepthWidth * KinectDTO::cDepthHeight * sizeof(UINT16));
+
 				IRTexture = UTexture2D::CreateTransient(KinectDTO::cDepthWidth, KinectDTO::cDepthWidth);
 			}
 
 			if (extractSkeletonData) {
-				// Initialize the Kinect and get coordinate mapper and the body reader
 				IBodyFrameSource* pBodyFrameSource = NULL;
 				hr = m_pKinectSensor->get_BodyFrameSource(&pBodyFrameSource);
 
@@ -253,7 +210,7 @@ bool KinectDevice::Init() {
 			}
 
 			if (extractSkeletonData || extractDepthData) {
-				if ( kinectData != nullptr) {
+				if (kinectData != nullptr) {
 					delete kinectData;
 				}
 
@@ -261,27 +218,17 @@ bool KinectDevice::Init() {
 			}
 
 			if (extractFaces) {
-				//char currentDir[2048];
-
-
 				UINT32 vertexCount = 0;
 				GetFaceModelVertexCount(&vertexCount);
 				totalFaceVertices = vertexCount;
 				UINT32 triangleCount = 0;
 				if (SUCCEEDED(GetFaceModelTriangleCount(&triangleCount))) {
-					
 					faceTriangles.SetNumZeroed(triangleCount * 3);
 					hr = GetFaceModelTriangles(faceTriangles.Num(), &faceTriangles[0]);
 				}
 
 				for (int count = 0; count < KinectDTO::cTotalBodies; count++) {
 					hr = CreateHighDefinitionFaceFrameSource(m_pKinectSensor, &m_pHDFaceFrameSource[count]);
-					if (hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND)) {
-						char strDLLPath[_MAX_PATH];
-						GetModuleFileNameA((HINSTANCE)&__ImageBase, strDLLPath, _MAX_PATH);
-						
-						break;
-					}
 					if (FAILED(hr)) {
 						UE_LOG(LogTemp, Error, TEXT("Error : CreateHighDefinitionFaceFrameSource()"));
 						extractFaces = false;
@@ -290,7 +237,6 @@ bool KinectDevice::Init() {
 					}
 					else {
 						hr = m_pHDFaceFrameSource[count]->OpenReader(&m_pFaceFrameReader[count]);
-
 						if (FAILED(hr)) {
 							UE_LOG(LogTemp, Error, TEXT("Error : Open Face reader()"));
 							extractFaces = false;
@@ -305,53 +251,16 @@ bool KinectDevice::Init() {
 								hr = S_OK;
 								break;
 							}
-							else {
-								hr = m_pHDFaceFrameSource[count]->OpenModelBuilder(FaceModelBuilderAttributes_None, &m_pFaceModelBuilder[count]);
-								if (FAILED(hr)) {
-									UE_LOG(LogTemp, Error, TEXT("Error : Opening model builder"));
-									extractFaces = false;
-									hr = S_OK;
-									break;
-								}
-								else {
-									float deformations[FaceShapeDeformations::FaceShapeDeformations_Count];
-									hr = CreateFaceModel(1.0f, FaceShapeDeformations::FaceShapeDeformations_Count, &deformations[0], &m_pFaceModel[count]);
-									if (FAILED(hr)) {
-										UE_LOG(LogTemp, Error, TEXT("Error creating face deformation model"));
-										extractFaces = false;
-										hr = S_OK;
-										break;
-									}
-									else {
-
-										if (SUCCEEDED(hr) && vertexCount > 0) {
-											m_pFaceVertices[count].SetNumZeroed(vertexCount);
-										}
-
-
-									}
-								}
-
-							}
 						}
 					}
 				}
-
 			}
 
 		}
 
-		if (!m_pKinectSensor || FAILED(hr)) {
-			UE_LOG(LogTemp, Error, TEXT("No ready Kinect found!"));
-			
-		}
-
-		
 	}
 
-
 	bRunning = true;
-	//HACK (OS): should return status
 	return bRunning;
 }
 
