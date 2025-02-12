@@ -3,6 +3,7 @@
 #include "KinectDevice.h"
 #include "KinematicChain.h"
 #include <Runtime/Engine/Classes/Engine/Texture2D.h>
+#include <mutex>
 #ifdef UpdateResource
 #undef  UpdateResource
 #endif
@@ -11,6 +12,7 @@ EXTERN_C IMAGE_DOS_HEADER __ImageBase;
 
 KinectDevice::KinectDevice()
 {
+	std::mutex kinectDataMutex;
 	m_pKinectSensor = NULL;
 	m_pCoordinateMapper = NULL;
 	m_pColorCoordinates = NULL;
@@ -87,12 +89,12 @@ KinectDevice::~KinectDevice()
 	}
 
 	if (infraRedBuffer) {
-		delete infraRedBuffer;
+		delete[] infraRedBuffer;
 		infraRedBuffer = NULL;
 	}
 
 	if (m_pInfraRedBuffer) {
-		delete m_pInfraRedBuffer;
+		delete[] m_pInfraRedBuffer;
 		m_pInfraRedBuffer = NULL;
 	}
 
@@ -104,6 +106,10 @@ KinectDevice::~KinectDevice()
 	SafeRelease(m_pBodyFrameReader);
 	SafeRelease(m_pInfraredFrameReader);
 	SafeRelease(m_pBodyIndexFrameReader);
+	if (m_pDethRawBuffer) {
+		delete[] m_pDethRawBuffer;
+		m_pDethRawBuffer = NULL;
+	}
 
 
 	for (int i = 0; i < KinectDTO::cTotalBodies; i++) {
@@ -149,7 +155,7 @@ void KinectDevice::DeleteInstance() {
 }
 
 bool KinectDevice::Init() {
-
+	std::lock_guard<std::mutex> lock(kinectDataMutex);
 	HRESULT hr;
 
 	hr = GetDefaultKinectSensor(&m_pKinectSensor);
@@ -801,6 +807,7 @@ void KinectDevice::Stop()
 }
 
 void KinectDevice::loadBody(Body20& body, IBody* pBody, UINT16* pDepthBuffer) {
+	std::lock_guard<std::mutex> lock(kinectDataMutex);
 	memset(&body, 0, sizeof(Body20));
 	if (pBody)
 	{

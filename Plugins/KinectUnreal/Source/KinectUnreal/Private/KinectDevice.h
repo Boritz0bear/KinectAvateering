@@ -9,6 +9,7 @@
 #include <kinect.Face.h>
 #include <Runtime/Engine/Classes/Engine/Texture2D.h>
 #include "KinectDTO.h"
+#include <mutex>
 
 template<class Interface>
 inline void SafeRelease(Interface *& pInterfaceToRelease) {

@@ -18,7 +18,7 @@ void KinectDTO::clear() {
 
 KinectDTO::~KinectDTO()
 {
-	delete depthRawData;
+	delete[] depthRawData;
 	depthRawData = NULL;
 }
 
